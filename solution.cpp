@@ -4,6 +4,10 @@
 #include <set>
 #include <map>
 #include <numeric>
+#include <execinfo.h>
+#include <signal.h>
+#include <stdlib.h>
+#include <unistd.h>
 
 using namespace std;
 
@@ -35,7 +39,7 @@ vector<string> reconstruct_path(state* goal);
 
 string initial;
 vector<state*> opened;
-map<string, float> closed; // TODO check for smaller
+map<string, float> closed;
 set<string> goals;
 map<string, vector<transition>> transitions;
 map<string, float> heuristics;
@@ -68,55 +72,127 @@ tuple<string, vector<transition>> extract_transition(string line) {
     return {state, ts};
 }
 
+void handler(int sig) {
+    void *array[10];
+    size_t size;
+
+    // get void*'s for all entries on the stack
+    size = backtrace(array, 10);
+
+    // print out all the frames to stderr
+    fprintf(stderr, "Error: signal %d:\n", sig);
+    backtrace_symbols_fd(array, size, STDERR_FILENO);
+    exit(1);
+}
+
 solution* bfs() {
     if (opened.empty()) {
         return nullptr;
     }
 
     state* s = opened[0];
-    if (goals.contains(*s->name)) {
+    cout<<*s->name;
+    cout<<"\n";
+    cout<<s->cost;
+    cout<<"\n";
+    if (goals.find(*s->name) != goals.end()) {
         auto* p = static_cast<solution *>(::malloc(sizeof(solution)));
         p->goal = s;
         closed[*s->name] = s->cost;
         return p;
     }
     opened.erase(opened.begin());
-    if (closed.contains(*s->name) && closed[*s->name] < s->cost) {
+    if (closed.find(*s->name) != closed.end() && closed[*s->name] < s->cost) {
+        delete s->name;
+        delete s;
         solution* ss = bfs();
         return ss;
     }
     closed[*s->name] = s->cost;
     vector<transition> trans = transitions[*s->name];
+    int c = 0;
     for ([[maybe_unused]] auto & tran : trans) {
         float acc_cost = s->cost + tran.cost;
-        if (closed.contains(tran.to) && closed[tran.to] < acc_cost) {
+        if (closed.find(tran.to) != closed.end() && closed[tran.to] < acc_cost) {
             continue;
         }
 
-        auto* p = static_cast<state *>(::malloc(sizeof(state)));
+        auto* p = new state;
         p->parent = s;
-        auto* sp = static_cast<string *>(::malloc(sizeof(string)));
-        *sp = tran.to;
-        p->name = sp;
+        p->name = &tran.to;
         p->cost = acc_cost;
         opened.push_back(p);
+        c++;
     }
 
+    if (c == 0) {
+//        delete s->name;
+//        s->name = nullptr;
+        delete s;
+        s = nullptr;
+    }
     solution* ss = bfs();
     return ss;
 }
+
+solution* bfs2() {
+    while (!opened.empty()) {
+        state* s = opened[0];
+        if (goals.find(*s->name) != goals.end()) {
+            auto* p = new solution;
+            p->goal = s;
+            closed[*s->name] = s->cost;
+            return p;
+        }
+        opened.erase(opened.begin());
+        if (closed.find(*s->name) != closed.end() && closed[*s->name] < s->cost) {
+            delete s->name;
+            delete s;
+            continue;
+        }
+        closed[*s->name] = s->cost;
+        vector<transition> trans = transitions[*s->name];
+        int c = 0;
+        for ([[maybe_unused]] auto & tran : trans) {
+            float acc_cost = s->cost + tran.cost;
+            if (closed.find(tran.to) != closed.end() && closed[tran.to] < acc_cost) {
+                continue;
+            }
+
+            auto* p = new state;
+            p->parent = s;
+            auto* str = new string;
+            *str = tran.to;
+            p->name = str;
+            p->cost = acc_cost;
+            opened.push_back(p);
+            c++;
+        }
+
+        if (c == 0) {
+        delete s->name;
+//        s->name = nullptr;
+            delete s;
+            s = nullptr;
+        }
+    }
+
+    return nullptr;
+}
+
 
 solution* searchBfs() {
     auto* p = static_cast<state *>(malloc(sizeof(state)));
     p->name = &initial;
     opened.push_back(p);
-    solution* s = bfs();
+    solution* s = bfs2();
     return s;
 }
 
-bool sort_opened(const state * left, const state * right) {
+bool sort_opened(const state* left, const state* right) {
     return right->cost >= left->cost;
 }
+
 
 solution* ucs() {
     if (opened.empty()) {
@@ -124,14 +200,16 @@ solution* ucs() {
     }
 
     state* s = opened[0];
-    if (goals.contains(*s->name)) {
+    if (goals.find(*s->name) != goals.end()) {
         auto* p = static_cast<solution *>(::malloc(sizeof(solution)));
         p->goal = s;
         closed[*s->name] = s->cost;
         return p;
     }
     opened.erase(opened.begin());
-    if (closed.contains(*s->name) && closed[*s->name] < s->cost) {
+    if (closed.find(*s->name) != closed.end() && closed[*s->name] < s->cost) {
+        delete s->name;
+        delete s;
         solution* ss = ucs();
         return ss;
     }
@@ -139,7 +217,7 @@ solution* ucs() {
     vector<transition> trans = transitions[*s->name];
     for ([[maybe_unused]] auto & tran : trans) {
         float acc_cost = s->cost + tran.cost;
-        if (closed.contains(tran.to) && closed[tran.to] < acc_cost) {
+        if (closed.find(tran.to) != closed.end() && closed[tran.to] < acc_cost) {
             continue;
         }
 
@@ -157,11 +235,50 @@ solution* ucs() {
     return ss;
 }
 
+solution* ucs2() {
+    std::set<state*, decltype(&sort_opened)> openedUcs(&sort_opened);
+    openedUcs.insert(opened[0]);
+
+    while (!openedUcs.empty()) {
+        state* s = *openedUcs.begin();
+        if (goals.find(*s->name) != goals.end()) {
+            auto* p = new solution;
+            p->goal = s;
+            closed[*s->name] = s->cost;
+            return p;
+        }
+        openedUcs.erase(openedUcs.begin());
+        if (closed.find(*s->name) != closed.end() && closed[*s->name] < s->cost) {
+            delete s->name;
+            delete s;
+            continue;
+        }
+        closed[*s->name] = s->cost;
+        vector<transition> trans = transitions[*s->name];
+        for ([[maybe_unused]] auto & tran : trans) {
+            float acc_cost = s->cost + tran.cost;
+            if (closed.find(tran.to) != closed.end() && closed[tran.to] < acc_cost) {
+                continue;
+            }
+
+            auto* p = new state;
+            p->parent = s;
+            auto* sp = new string;
+            *sp = tran.to;
+            p->name = sp;
+            p->cost = acc_cost;
+            int n = openedUcs.size();
+            openedUcs.insert(p);
+        }
+    }
+    return nullptr;
+}
+
 solution* searchUcs() {
     auto* p = static_cast<state *>(malloc(sizeof(state)));
     p->name = &initial;
     opened.push_back(p);
-    solution* s = ucs();
+    solution* s = ucs2();
     return s;
 }
 
@@ -175,14 +292,14 @@ solution* astar() {
     }
 
     state* s = opened[0];
-    if (goals.contains(*s->name)) {
+    if (goals.find(*s->name) != goals.end()) {
         auto* p = static_cast<solution *>(::malloc(sizeof(solution)));
         p->goal = s;
         closed[*s->name] = s->cost;
         return p;
     }
     opened.erase(opened.begin());
-    if (closed.contains(*s->name) && closed[*s->name] < s->cost) {
+    if (closed.find(*s->name) != closed.end() && closed[*s->name] < s->cost) {
         solution* ss = astar();
         return ss;
     }
@@ -190,7 +307,7 @@ solution* astar() {
     vector<transition> trans = transitions[*s->name];
     for ([[maybe_unused]] auto & tran : trans) {
         float acc_cost = s->cost + tran.cost;
-        if (closed.contains(tran.to) && closed[tran.to] < acc_cost) {
+        if (closed.find(tran.to) != closed.end() && closed[tran.to] < acc_cost) {
             continue;
         }
 
@@ -217,6 +334,7 @@ solution* searchAstar() {
 }
 
 int main(int argc, char *argv[]) {
+    signal(SIGSEGV, handler);
     string alg;
     string states;
     string heuristics_location;
@@ -260,11 +378,10 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    cout << states;
     std::ifstream infile(states);
 
     std::getline(infile,initial);
-    while (initial.starts_with('#')) {
+    while (initial.rfind('#', 0) == 0) {
         std::getline(infile,initial);
     }
     if (initial.empty()) {
@@ -273,7 +390,7 @@ int main(int argc, char *argv[]) {
 
     string input;
     while (std::getline(infile, input)) {
-        if (input.starts_with('#')) {
+        if (input.rfind('#', 0) == 0) {
             continue;
         }
         for (unsigned long idx = input.find(' '); idx > 0 && idx < input.length();) {
@@ -288,7 +405,7 @@ int main(int argc, char *argv[]) {
     }
 
     while (std::getline(infile, input)) {
-        if (input.starts_with('#')) {
+        if (input.rfind('#', 0) == 0) {
             continue;
         }
         if (input.empty()) {
@@ -301,7 +418,7 @@ int main(int argc, char *argv[]) {
     if (!heuristics_location.empty()) {
         std::ifstream heur(heuristics_location);
         while (std::getline(heur, input)) {
-            if (input.starts_with('#')) {
+            if (input.rfind('#', 0) == 0) {
                 continue;
             }
             if (input.empty()) {
@@ -338,7 +455,7 @@ int main(int argc, char *argv[]) {
             }
         }
         printf("[PATH_LENGTH]: %zu\n", p.size());
-        printf("[TOTAL_COST]: %f\n", s->goal->cost);
+        printf("[TOTAL_COST]: %.1f\n", s->goal->cost);
         cout<<"[PATH]: " + full_path + "\n";
     }
 
