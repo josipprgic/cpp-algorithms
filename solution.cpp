@@ -53,7 +53,7 @@ tuple<string, vector<transition>> extract_transition(string line) {
     }
     line = line.substr(idx + 2);
 
-    for (idx = line.find(' '); idx > 0; idx = line.find(' ')) {
+    for (idx = line.find(' '); idx > 0;) {
         string trans = line.substr(0, idx);
         unsigned long i = trans.find(',');
         string to = trans.substr(0, i);
@@ -63,7 +63,15 @@ tuple<string, vector<transition>> extract_transition(string line) {
         transition t = transition{ to, cost };
         ts.push_back(t);
         line = line.substr(idx + 1);
+        idx = line.find(' ');
         if (idx > line.length()) {
+            i = line.find(',');
+            to = line.substr(0, i);
+            s = line.substr(i + 1);
+            cost = std::stof(s);
+
+            t = transition{ to, cost };
+            ts.push_back(t);
             break;
         }
     }
@@ -91,10 +99,6 @@ solution* bfs() {
     }
 
     state* s = opened[0];
-    cout<<*s->name;
-    cout<<"\n";
-    cout<<s->cost;
-    cout<<"\n";
     if (goals.find(*s->name) != goals.end()) {
         auto* p = static_cast<solution *>(::malloc(sizeof(solution)));
         p->goal = s;
@@ -267,7 +271,6 @@ solution* ucs2() {
             *sp = tran.to;
             p->name = sp;
             p->cost = acc_cost;
-            int n = openedUcs.size();
             openedUcs.insert(p);
         }
     }
@@ -282,8 +285,13 @@ solution* searchUcs() {
     return s;
 }
 
-bool sort_opened_heur(const state * left, const state * right) {
-    return right->cost + heuristics[*right->name] >= left->cost + heuristics[*left->name];
+bool sort_opened_heur(const state* left, const state* right) {
+    float lc = left->cost + heuristics[*left->name];
+    float rc = right->cost + heuristics[*right->name];
+    if (lc == rc) {
+        return strcmp(left->name->c_str(), right->name->c_str()) < 0;
+    }
+    return lc < rc;
 }
 
 solution* astar() {
@@ -293,7 +301,7 @@ solution* astar() {
 
     state* s = opened[0];
     if (goals.find(*s->name) != goals.end()) {
-        auto* p = static_cast<solution *>(::malloc(sizeof(solution)));
+        auto* p = new solution;
         p->goal = s;
         closed[*s->name] = s->cost;
         return p;
@@ -311,9 +319,9 @@ solution* astar() {
             continue;
         }
 
-        auto* p = static_cast<state *>(::malloc(sizeof(state)));
+        auto* p = new state;
         p->parent = s;
-        auto* sp = static_cast<string *>(::malloc(sizeof(string)));
+        auto* sp = new string;
         *sp = tran.to;
         p->name = sp;
         p->cost = acc_cost;
@@ -333,13 +341,63 @@ solution* searchAstar() {
     return s;
 }
 
+void check_optimisticF() {
+
+    vector<state*> opened_states;
+    map<string, float> closed_states;
+    set<string> all_goals;
+    map<string, vector<transition>> transitions;
+    map<string, float> heuristics;
+
+    while (!opened.empty()) {
+        state* s = opened[0];
+        if (goals.find(*s->name) != goals.end()) {
+            auto* p = new solution;
+            p->goal = s;
+            closed[*s->name] = s->cost;
+            return p;
+        }
+        opened.erase(opened.begin());
+        if (closed.find(*s->name) != closed.end() && closed[*s->name] < s->cost) {
+            delete s->name;
+            delete s;
+            continue;
+        }
+        closed[*s->name] = s->cost;
+        vector<transition> trans = transitions[*s->name];
+        int c = 0;
+        for ([[maybe_unused]] auto & tran : trans) {
+            float acc_cost = s->cost + tran.cost;
+            if (closed.find(tran.to) != closed.end() && closed[tran.to] < acc_cost) {
+                continue;
+            }
+
+            auto* p = new state;
+            p->parent = s;
+            auto* str = new string;
+            *str = tran.to;
+            p->name = str;
+            p->cost = acc_cost;
+            opened.push_back(p);
+            c++;
+        }
+
+        if (c == 0) {
+            delete s->name;
+//        s->name = nullptr;
+            delete s;
+            s = nullptr;
+        }
+    }
+}
+
 int main(int argc, char *argv[]) {
     signal(SIGSEGV, handler);
     string alg;
     string states;
     string heuristics_location;
-    string check_optimistic;
-    string check_consistent;
+    bool check_optimistic;
+    bool check_consistent;
 
     if(argc < 2){
         std::cout << "Not enough arguments";
@@ -368,11 +426,11 @@ int main(int argc, char *argv[]) {
                 break;
             }
             case 3: {
-                check_optimistic = argv[++i];
+                check_optimistic = true;
                 break;
             }
             case 4: {
-                check_consistent = argv[++i];
+                check_consistent = true;
                 break;
             }
         }
@@ -432,12 +490,21 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    if (check_optimistic) {
+        cout<<"# HEURISTIC-OPTIMISTIC " + heuristics_location + "\n";
+        check_optimisticF();
+        return 0;
+    }
+
     auto* s = static_cast<solution *>(::malloc(sizeof(solution)));
     if (alg == "bfs") {
+        cout<<"# BFS\n";
         s = searchBfs();
     } else if (alg == "ucs") {
+        cout<<"# UCS\n";
         s = searchUcs();
     } else if (alg == "astar") {
+        cout<<"# A-STAR " + heuristics_location + "\n";
         s = searchAstar();
     }
 
