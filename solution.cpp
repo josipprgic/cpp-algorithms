@@ -115,7 +115,7 @@ solution* bfs() {
     closed[*s->name] = s->cost;
     vector<transition> trans = transitions[*s->name];
     int c = 0;
-    for ([[maybe_unused]] auto & tran : trans) {
+    for (auto & tran : trans) {
         float acc_cost = s->cost + tran.cost;
         if (closed.find(tran.to) != closed.end() && closed[tran.to] < acc_cost) {
             continue;
@@ -130,10 +130,8 @@ solution* bfs() {
     }
 
     if (c == 0) {
-//        delete s->name;
-//        s->name = nullptr;
+        delete s->name;
         delete s;
-        s = nullptr;
     }
     solution* ss = bfs();
     return ss;
@@ -157,7 +155,7 @@ solution* bfs2() {
         closed[*s->name] = s->cost;
         vector<transition> trans = transitions[*s->name];
         int c = 0;
-        for ([[maybe_unused]] auto & tran : trans) {
+        for (auto & tran : trans) {
             float acc_cost = s->cost + tran.cost;
             if (closed.find(tran.to) != closed.end() && closed[tran.to] < acc_cost) {
                 continue;
@@ -174,10 +172,8 @@ solution* bfs2() {
         }
 
         if (c == 0) {
-        delete s->name;
-//        s->name = nullptr;
+            delete s->name;
             delete s;
-            s = nullptr;
         }
     }
 
@@ -196,7 +192,6 @@ solution* searchBfs() {
 bool sort_opened(const state* left, const state* right) {
     return right->cost >= left->cost;
 }
-
 
 solution* ucs() {
     if (opened.empty()) {
@@ -259,7 +254,7 @@ solution* ucs2() {
         }
         closed[*s->name] = s->cost;
         vector<transition> trans = transitions[*s->name];
-        for ([[maybe_unused]] auto & tran : trans) {
+        for (auto & tran : trans) {
             float acc_cost = s->cost + tran.cost;
             if (closed.find(tran.to) != closed.end() && closed[tran.to] < acc_cost) {
                 continue;
@@ -313,7 +308,7 @@ solution* astar() {
     }
     closed[*s->name] = s->cost;
     vector<transition> trans = transitions[*s->name];
-    for ([[maybe_unused]] auto & tran : trans) {
+    for (auto & tran : trans) {
         float acc_cost = s->cost + tran.cost;
         if (closed.find(tran.to) != closed.end() && closed[tran.to] < acc_cost) {
             continue;
@@ -333,31 +328,19 @@ solution* astar() {
     return ss;
 }
 
-solution* searchAstar() {
-    auto* p = static_cast<state *>(malloc(sizeof(state)));
-    p->name = &initial;
-    opened.push_back(p);
-    solution* s = astar();
-    return s;
-}
+solution* astar2() {
+    std::set<state*, decltype(&sort_opened_heur)> opened_astar(&sort_opened_heur);
+    opened_astar.insert(opened[0]);
 
-void check_optimisticF() {
-
-    vector<state*> opened_states;
-    map<string, float> closed_states;
-    set<string> all_goals;
-    map<string, vector<transition>> transitions;
-    map<string, float> heuristics;
-
-    while (!opened.empty()) {
-        state* s = opened[0];
+    while (!opened_astar.empty()) {
+        state* s = *opened_astar.begin();
         if (goals.find(*s->name) != goals.end()) {
             auto* p = new solution;
             p->goal = s;
             closed[*s->name] = s->cost;
             return p;
         }
-        opened.erase(opened.begin());
+        opened_astar.erase(opened_astar.begin());
         if (closed.find(*s->name) != closed.end() && closed[*s->name] < s->cost) {
             delete s->name;
             delete s;
@@ -365,8 +348,7 @@ void check_optimisticF() {
         }
         closed[*s->name] = s->cost;
         vector<transition> trans = transitions[*s->name];
-        int c = 0;
-        for ([[maybe_unused]] auto & tran : trans) {
+        for (auto & tran : trans) {
             float acc_cost = s->cost + tran.cost;
             if (closed.find(tran.to) != closed.end() && closed[tran.to] < acc_cost) {
                 continue;
@@ -374,21 +356,99 @@ void check_optimisticF() {
 
             auto* p = new state;
             p->parent = s;
-            auto* str = new string;
-            *str = tran.to;
-            p->name = str;
+            auto* sp = new string;
+            *sp = tran.to;
+            p->name = sp;
             p->cost = acc_cost;
-            opened.push_back(p);
-            c++;
-        }
-
-        if (c == 0) {
-            delete s->name;
-//        s->name = nullptr;
-            delete s;
-            s = nullptr;
+            opened_astar.insert(p);
         }
     }
+    return nullptr;
+}
+
+solution* searchAstar() {
+    auto* p = static_cast<state *>(malloc(sizeof(state)));
+    p->name = &initial;
+    opened.push_back(p);
+    solution* s = astar2();
+    return s;
+}
+
+void check_optimisticF() {
+    map<string, vector<transition>> transs;
+
+    for (const auto& i : transitions) {
+        for (const auto& goal : i.second) {
+            transition t = transition{i.first, goal.cost};
+            transs[goal.to].push_back(t);
+        }
+    }
+
+    for (const auto& g : goals) {
+        auto* st = new state;
+        st->name = &g;
+        opened.push_back(st);
+
+        while (!opened.empty()) {
+            state* s = opened[0];
+            opened.erase(opened.begin());
+            if (closed.find(*s->name) != closed.end() && closed[*s->name] < s->cost) {
+                delete s->name;
+                delete s;
+                continue;
+            }
+            closed[*s->name] = s->cost;
+            vector<transition> trans = transs[*s->name];
+            int c = 0;
+            for (auto & tran : trans) {
+                float acc_cost = s->cost + tran.cost;
+                if (closed.find(tran.to) != closed.end() && closed[tran.to] < acc_cost) {
+                    continue;
+                }
+
+                auto* p = new state;
+                p->parent = s;
+                auto* str = new string;
+                *str = tran.to;
+                p->name = str;
+                p->cost = acc_cost;
+                opened.push_back(p);
+                c++;
+            }
+
+            if (c == 0) {
+                delete s->name;
+                delete s;
+            }
+        }
+    }
+    string w = " ";
+    for (const auto& i : closed) {
+        if (i.second < heuristics[i.first]) {
+            ::printf("[CONDITION]: [ERR] h(%s) <= h*: %.1f <= %.1f\n", i.first.c_str(), heuristics[i.first], i.second);
+            w = " not ";
+        } else {
+            ::printf("[CONDITION]: [OK] h(%s) <= h*: %.1f <= %.1f\n", i.first.c_str(), heuristics[i.first], i.second);
+        }
+    }
+
+    ::printf("[CONCLUSION]: Heuristic is%soptimistic.\n", w.c_str());
+}
+
+void check_consistentF() {
+    string cons = " ";
+    for (auto const& e : transitions) {
+        float heur = heuristics[e.first];
+        for (auto const& t : e.second) {
+            if (heur <= heuristics[t.to] + t.cost) {
+                ::printf("[CONDITION]: [OK] h(%s) <= h(%s) + c: %.1f <= %.1f + %.1f\n", e.first.c_str(), t.to.c_str(), heur, heuristics[t.to], t.cost);
+            } else {
+                ::printf("[CONDITION]: [ERR] h(%s) <= h(%s) + c: %.1f <= %.1f + %.1f\n", e.first.c_str(), t.to.c_str(), heur, heuristics[t.to], t.cost);
+                cons = " not ";
+            }
+        }
+    }
+    ::printf("[CONCLUSION]: Heuristic is%sconsistent.\n", cons.c_str());
 }
 
 int main(int argc, char *argv[]) {
@@ -495,7 +555,11 @@ int main(int argc, char *argv[]) {
         check_optimisticF();
         return 0;
     }
-
+    if (check_consistent) {
+        cout<<"# HEURISTIC-CONSISTENT " + heuristics_location + "\n";
+        check_consistentF();
+        return 0;
+    }
     auto* s = static_cast<solution *>(::malloc(sizeof(solution)));
     if (alg == "bfs") {
         cout<<"# BFS\n";
