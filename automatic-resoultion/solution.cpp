@@ -24,6 +24,8 @@ struct clause {
 //map<string, float> heuristics;
 clause goal;
 vector<clause> clauses;
+vector<clause> support_set;
+set<long> conjectured;
 
 token create_token(const string& s) {
     unsigned long idx = s.find('~', 0);
@@ -57,6 +59,22 @@ clause extract_clause(const string& line) {
     return clause{toks};
 }
 
+vector<clause> negate_clause(const clause& c) {
+    vector<clause> css;
+    for (auto & t : c.tokens) {
+        token tok = token{t.value, !t.negated};
+        vector<token> toks;
+        toks.push_back(tok);
+        css.push_back(clause{toks});
+    }
+
+    return css;
+}
+
+string cnf(clause c) {
+    return "";
+}
+
 int main(int argc, char *argv[]) {
     string alg;
     string clauses_src;
@@ -84,8 +102,15 @@ int main(int argc, char *argv[]) {
         clauses.push_back(cl);
     }
 
-    goal = clauses[clauses.size() - 1];
-    clauses.pop_back();;
+    vector<clause> goals = negate_clause(clauses[clauses.size() - 1]);
+    for (const auto & g : goals) {
+        clauses.push_back(g);
+    }
+
+    for (int i = 0; i < clauses.size(); i++) {
+        string s = cnf(clauses[i]);
+        ::printf("%d. %s", i, s.c_str());
+    }
 
     if (!commands.empty()) {
         std::ifstream infile2(commands);
@@ -99,6 +124,9 @@ int main(int argc, char *argv[]) {
             cout << input;
         }
     }
+
+//    simplify_clauses();
+
     if (alg == "resolution") {
 
     }
