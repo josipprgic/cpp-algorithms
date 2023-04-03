@@ -71,8 +71,87 @@ vector<clause> negate_clause(const clause& c) {
     return css;
 }
 
+bool is_tautology(const clause& cl) {
+    for (const auto & token : cl.tokens) {
+        for (const auto & j : cl.tokens) {
+            if (j.value == token.value && j.negated == !token.negated) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+bool is_covered(const clause& first, const clause& second) {
+    for (const auto & token : first.tokens) {
+        bool has_this = false;
+        for (const auto & j : second.tokens) {
+            if (j.value == token.value && (j.negated && token.negated || !j.negated && !token.negated)) {
+                has_this = true;
+                break;
+            }
+        }
+
+        if (!has_this) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+void delete_redundant() {
+    set<int> to_del;
+    for (int i = 0; i < clauses.size(); i++) {
+        for (int j = 0; j < clauses.size(); j++) {
+            if (i == j) {
+                continue;
+            }
+            bool is_cov = is_covered(clauses[i], clauses[j]);
+            if (is_cov) {
+                to_del.insert(j);
+            }
+        }
+    }
+
+    for (int i = 0; i < clauses.size(); i++) {
+        if (is_tautology(clauses[i])) {
+            to_del.insert(i);
+        }
+    }
+
+    vector<clause> tmp;
+    for (int i = 0; i < clauses.size(); i++) {
+        if (to_del.contains(i)) {
+            continue;
+        }
+
+        tmp.push_back(clauses[i]);
+    }
+
+    clauses = tmp;
+}
+
+string stringify(token t) {
+    string res;
+    if (t.negated) {
+        res += "~";
+    }
+    res += t.value;
+
+    return res;
+}
+
 string cnf(clause c) {
-    return "";
+    string res;
+
+    for (int i = 0; i < c.tokens.size() - 1; i++) {
+        res += stringify(c.tokens[i]);
+        res += " V ";
+    }
+    res += stringify(c.tokens[c.tokens.size()-1]);
+
+    return res;
 }
 
 int main(int argc, char *argv[]) {
@@ -103,13 +182,9 @@ int main(int argc, char *argv[]) {
     }
 
     vector<clause> goals = negate_clause(clauses[clauses.size() - 1]);
+    clauses.erase(clauses.end() - 1);
     for (const auto & g : goals) {
         clauses.push_back(g);
-    }
-
-    for (int i = 0; i < clauses.size(); i++) {
-        string s = cnf(clauses[i]);
-        ::printf("%d. %s", i, s.c_str());
     }
 
     if (!commands.empty()) {
@@ -125,7 +200,11 @@ int main(int argc, char *argv[]) {
         }
     }
 
-//    simplify_clauses();
+    delete_redundant();
+
+    for (int i = 0; i < clauses.size(); i++) {
+        ::printf("%d. %s\n", i+1, cnf(clauses[i]).c_str());
+    }
 
     if (alg == "resolution") {
 
