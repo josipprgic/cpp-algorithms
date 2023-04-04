@@ -15,6 +15,8 @@ struct token {
 };
 
 struct clause {
+    int first{};
+    int second{};
     vector<token> tokens;
 };
 
@@ -25,7 +27,7 @@ struct clause {
 clause goal;
 vector<clause> clauses;
 vector<clause> support_set;
-set<long> conjectured;
+set<string> found;
 
 token create_token(const string& s) {
     unsigned long idx = s.find('~', 0);
@@ -56,7 +58,7 @@ clause extract_clause(const string& line) {
     token tok  = create_token(inp);
     toks.push_back(tok);
 
-    return clause{toks};
+    return clause{-1, -1, toks};
 }
 
 vector<clause> negate_clause(const clause& c) {
@@ -65,7 +67,7 @@ vector<clause> negate_clause(const clause& c) {
         token tok = token{t.value, !t.negated};
         vector<token> toks;
         toks.push_back(tok);
-        css.push_back(clause{toks});
+        css.push_back(clause{c.first, c.second, toks});
     }
 
     return css;
@@ -154,6 +156,86 @@ string cnf(clause c) {
     return res;
 }
 
+vector<clause> resolvec(int f, int s) {
+    clause first = support_set[f];
+    clause second = s >= clauses.size() ? support_set[s - clauses.size()] : clauses[s];
+    vector<token> remainder_f;
+    vector<token> second_toks = second.tokens;
+    for (int i = 0; i < first.tokens.size(); i++) {
+        bool found = false;
+        for (int j = 0; j < second_toks.size(); j++) {
+            if (first.tokens[i].value == second_toks[j].value && first.tokens[i].negated != second_toks[j].negated) {
+                found = true;
+                second_toks.erase(second_toks.begin() + j);
+                break;
+            }
+        }
+
+        if (!found) {
+            remainder_f.push_back(first.tokens[i]);
+        }
+    }
+
+    vector<clause> res;
+    if (!remainder_f.empty()) {
+        res.push_back(clause{f, s, remainder_f});
+    }
+    if (!second_toks.empty()) {
+        res.push_back(clause{f, s, second_toks});
+    }
+
+    return res;
+}
+
+void print_sol(clause* c, int i, int j) {
+    if (i < 0 || j < 0) {
+        return;
+    }
+
+    clause first = support_set[i];
+    clause second = j >= clauses.size() ? support_set[j - clauses.size()] : clauses[j];
+    print_sol(&first, first.first, first.second);
+    print_sol(&second, second.first, second.second);
+    if (c != nullptr) {
+        ::printf("%d. %s (%d, %d)\n", i+1, cnf(*c).c_str(), i, j);
+    }
+}
+
+void resolve() {
+    for (int i = 0; i < clauses.size(); i++) {
+        found.insert(cnf(clauses[i]));
+    }
+    for (int i = 0; i < support_set.size(); i++) {
+        found.insert(cnf(support_set[i]));
+    }
+        for (int i = 0; i < support_set.size();) {
+            int cr = 0;
+            int ss_size = support_set.size();
+            for (int j = 0, n = clauses.size() + ss_size; j < n; j++) {
+                if (i + clauses.size() == j) {
+                    continue;
+                }
+
+                vector<clause> res = resolvec(i, j);
+                if (res.empty()) {
+                    cout<<"FOUND THE SUCKER\n";
+                    print_sol(nullptr, i, j);
+                    return;
+                }
+                for (const auto & re : res) {
+                    string ccc = cnf(re);
+                    if (found.find(ccc) == found.end()) {
+                        support_set.push_back(re);
+                        found.insert(ccc);
+                        cr++;
+                    }
+                }
+            }
+
+            i = support_set.size() - cr;
+        }
+}
+
 int main(int argc, char *argv[]) {
     string alg;
     string clauses_src;
@@ -181,7 +263,8 @@ int main(int argc, char *argv[]) {
         clauses.push_back(cl);
     }
 
-    vector<clause> goals = negate_clause(clauses[clauses.size() - 1]);
+    goal = clauses[clauses.size() - 1];
+    vector<clause> goals = negate_clause(goal);
     clauses.erase(clauses.end() - 1);
     for (const auto & g : goals) {
         clauses.push_back(g);
@@ -201,13 +284,21 @@ int main(int argc, char *argv[]) {
     }
 
     delete_redundant();
+    clauses.erase(clauses.end() - goals.size());
+    for (auto const & c : goals) {
+        support_set.push_back(c);
+    }
 
     for (int i = 0; i < clauses.size(); i++) {
         ::printf("%d. %s\n", i+1, cnf(clauses[i]).c_str());
     }
+    cout<<"------------\n";
+    for (int i = 0; i < support_set.size(); i++) {
+        ::printf("%zu. %s\n", i+1 + clauses.size(), cnf(support_set[i]).c_str());
+    }
 
     if (alg == "resolution") {
-
+        resolve();
     }
 //
 //    if (check_optimistic) {
