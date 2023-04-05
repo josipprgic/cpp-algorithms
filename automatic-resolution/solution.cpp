@@ -26,7 +26,7 @@ struct clause {
 //map<string, float> heuristics;
 clause goal;
 vector<clause> clauses;
-vector<clause> support_set;
+int original_clauses;
 set<string> found;
 
 token create_token(const string& s) {
@@ -36,6 +36,22 @@ token create_token(const string& s) {
     }
 
     return token{s, false};
+}
+
+vector<token> factorize(vector<token> toks) {
+    for (int i = 0; i < toks.size(); i++) {
+        for (int j = 0; j < toks.size(); j++) {
+            if (i==j) {
+                continue;
+            }
+            if (toks[i].value == toks[j].value && toks[i].negated == toks[j].negated) {
+                toks.erase(toks.begin() + j);
+                j -= 1;
+            }
+        }
+    }
+
+    return toks;
 }
 
 clause extract_clause(const string& line) {
@@ -58,7 +74,7 @@ clause extract_clause(const string& line) {
     token tok  = create_token(inp);
     toks.push_back(tok);
 
-    return clause{-1, -1, toks};
+    return clause{-1, -1, factorize(toks)};
 }
 
 vector<clause> negate_clause(const clause& c) {
@@ -124,7 +140,7 @@ void delete_redundant() {
 
     vector<clause> tmp;
     for (int i = 0; i < clauses.size(); i++) {
-        if (to_del.contains(i)) {
+        if (to_del.find(i) != to_del.end()) {
             continue;
         }
 
@@ -149,7 +165,7 @@ string cnf(clause c) {
 
     for (int i = 0; i < c.tokens.size() - 1; i++) {
         res += stringify(c.tokens[i]);
-        res += " V ";
+        res += " v ";
     }
     res += stringify(c.tokens[c.tokens.size()-1]);
 
@@ -157,47 +173,83 @@ string cnf(clause c) {
 }
 
 vector<clause> resolvec(int f, int s) {
-    clause first = support_set[f];
-    clause second = s >= clauses.size() ? support_set[s - clauses.size()] : clauses[s];
+    clause first = clauses[f];
+    clause second = clauses[s];
     vector<token> remainder_f;
     vector<token> second_toks = second.tokens;
+    bool found_all = false;
     for (int i = 0; i < first.tokens.size(); i++) {
-        bool found = false;
+        bool ff = false;
         for (int j = 0; j < second_toks.size(); j++) {
             if (first.tokens[i].value == second_toks[j].value && first.tokens[i].negated != second_toks[j].negated) {
-                found = true;
+                ff = true;
                 second_toks.erase(second_toks.begin() + j);
+                found_all = true;
                 break;
             }
         }
 
-        if (!found) {
+        if (!ff) {
             remainder_f.push_back(first.tokens[i]);
         }
     }
-
     vector<clause> res;
-    if (!remainder_f.empty()) {
+
+    if (found_all) {
+        vector<token> res_toks;
+        for (auto const & t : remainder_f) {
+            res_toks.push_back(t);
+        }
+        for (auto const & t : second_toks) {
+            res_toks.push_back(t);
+        }
+        if (!res_toks.empty()) {
+            clause c = clause{f, s, res_toks};
+            if (is_tautology(c)) {
+                return res;
+            }
+            res_toks = factorize(res_toks);
+            if (!res_toks.empty()) {
+                res.push_back(clause{f, s, res_toks});
+            }
+        }
+    } else {
         res.push_back(clause{f, s, remainder_f});
-    }
-    if (!second_toks.empty()) {
         res.push_back(clause{f, s, second_toks});
     }
 
     return res;
 }
 
+vector<clause> used;
+map<int, int> added;
+
 void print_sol(clause* c, int i, int j) {
+    if (used.empty()) {
+        for (int k = 0; k < original_clauses; k++) {
+            used.push_back(clauses[k]);
+            added[k] = k;
+        }
+    }
     if (i < 0 || j < 0) {
         return;
     }
 
-    clause first = support_set[i];
-    clause second = j >= clauses.size() ? support_set[j - clauses.size()] : clauses[j];
+    clause first = clauses[i];
+    clause second = clauses[j];
     print_sol(&first, first.first, first.second);
     print_sol(&second, second.first, second.second);
-    if (c != nullptr) {
-        ::printf("%d. %s (%d, %d)\n", i+1, cnf(*c).c_str(), i, j);
+    if (i >= original_clauses && added.find(i) == added.end()) {
+        clause c1 = clauses[i];
+        clause s = clause{added[c1.first], added[c1.second], c1.tokens};
+        used.push_back(s);
+        added[i] = original_clauses++;
+    }
+    if (j >= original_clauses && added.find(j) == added.end()) {
+        clause c1 = clauses[j];
+        clause s = clause{added[c1.first], added[c1.second], c1.tokens};
+        used.push_back(s);
+        added[j] = original_clauses++;
     }
 }
 
@@ -205,35 +257,41 @@ void resolve() {
     for (int i = 0; i < clauses.size(); i++) {
         found.insert(cnf(clauses[i]));
     }
-    for (int i = 0; i < support_set.size(); i++) {
-        found.insert(cnf(support_set[i]));
-    }
-        for (int i = 0; i < support_set.size();) {
+        for (int i = original_clauses; i < clauses.size(); i++) {
             int cr = 0;
-            int ss_size = support_set.size();
-            for (int j = 0, n = clauses.size() + ss_size; j < n; j++) {
-                if (i + clauses.size() == j) {
+            int n = clauses.size();
+            for (int j = 0; j < n; j++) {
+                if (i == j) {
                     continue;
                 }
 
                 vector<clause> res = resolvec(i, j);
                 if (res.empty()) {
-                    cout<<"FOUND THE SUCKER\n";
+                    int oc = original_clauses;
                     print_sol(nullptr, i, j);
+                    vector<token> toks;
+                    toks.push_back(token{"NIL", false});
+                    clause s = clause{added[i], added[j], toks};
+                    used.push_back(s);
+                    for (int coun = oc +1; coun < used.size(); coun++) {
+                        clause cc = used[coun];
+                        ::printf("%d. %s(%d, %d)\n", coun+1, cnf(cc).c_str(), cc.first+1, cc.second+1);
+                    }
+                    cout<<"===============\n";
+                    ::printf("[CONCLUSION]: %s is true\n", cnf(goal).c_str());
                     return;
                 }
-                for (const auto & re : res) {
+                for (const auto& re : res) {
                     string ccc = cnf(re);
                     if (found.find(ccc) == found.end()) {
-                        support_set.push_back(re);
+                        clauses.push_back(re);
                         found.insert(ccc);
                         cr++;
                     }
                 }
             }
-
-            i = support_set.size() - cr;
         }
+    ::printf("[CONCLUSION]: %s is unknown\n", cnf(goal).c_str());
 }
 
 int main(int argc, char *argv[]) {
@@ -285,17 +343,15 @@ int main(int argc, char *argv[]) {
 
     delete_redundant();
     clauses.erase(clauses.end() - goals.size());
+    original_clauses = clauses.size();
     for (auto const & c : goals) {
-        support_set.push_back(c);
+        clauses.push_back(c);
     }
 
     for (int i = 0; i < clauses.size(); i++) {
         ::printf("%d. %s\n", i+1, cnf(clauses[i]).c_str());
     }
-    cout<<"------------\n";
-    for (int i = 0; i < support_set.size(); i++) {
-        ::printf("%zu. %s\n", i+1 + clauses.size(), cnf(support_set[i]).c_str());
-    }
+    cout<<"===============\n";
 
     if (alg == "resolution") {
         resolve();
