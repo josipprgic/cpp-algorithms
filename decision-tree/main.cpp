@@ -29,10 +29,9 @@ struct NodeDesc {
 
 vector<string> traits;
 map<int, set<string>> poss_val;
-string label;
 vector<vector<string>> dataset;
 vector<vector<string>> test_dataset;
-vector<vector<Node>> t_p;
+map<string, int> labels;
 
 void printTree(Node n, vector<NodeDesc> parents) {
     if (n.children.empty()) {
@@ -40,7 +39,7 @@ void printTree(Node n, vector<NodeDesc> parents) {
         for (int i = 0; i < parents.size(); i++) {
             NodeDesc p = parents[i];
             char *s = static_cast<char *>(::malloc(1024 * sizeof(char)));
-            ::snprintf(s, 1024, "%d. %s=%s ", p.node.depth+1, traits[p.node.nameId].c_str(), p.cond.c_str());
+            ::snprintf(s, 1024, "%d:%s=%s ", p.node.depth+1, traits[p.node.nameId].c_str(), p.cond.c_str());
             l += std::string(s);
         }
         ::printf("%s%s\n", l.c_str(), n.val.c_str());
@@ -51,21 +50,6 @@ void printTree(Node n, vector<NodeDesc> parents) {
         printTree(c.second, parents);
         parents.pop_back();
     }
-//    if (n.children.empty()) {
-//        return parents + n.val + "\n";
-//    }
-//
-//    for (auto const &c : n.children) {
-//        char *s = static_cast<char *>(::malloc(1024 * sizeof(char)));
-//        if (parents == "") {
-//            ::snprintf(s, 1024, "%d. %s=%s ", n.depth+1, traits[n.nameId].c_str(), c.first.c_str());
-//        } else {
-//            ::snprintf(s, 1024, "%s %d. %s=%s ", parents.c_str(), n.depth+1, traits[n.nameId].c_str(), c.first.c_str());
-//        }
-//        ::printf("%s", printTree(c.second, std::string(s), c.first).c_str());
-//    }
-//
-//    return parents;
 }
 
 double entropyf(const map<string, int> &g) {
@@ -146,7 +130,37 @@ map<int, double> IG(map<int, string> filter, double entropy) {
     return res;
 }
 
-Node recurse(double start_entropy, map<int, string> branch, int depth) {
+Node recurse(double start_entropy, map<int, string> branch, int depth, int maxdepth) {
+    if (depth == maxdepth) {
+        map<string, int> counts;
+        for (auto const& d : dataset) {
+            bool found = true;
+            for (auto const &e : branch) {
+                if (d[e.first] != e.second) {
+                    found = false;
+                    break;
+                }
+            }
+            if (found) {
+                counts[d[d.size()-1]]++;
+            }
+        }
+        if (counts.empty()) {
+            for (auto const& d : dataset) {
+                counts[d[d.size()-1]]++;
+            }
+        }
+        int max = 0;
+        string maxv;
+        for (auto const &e : counts) {
+            if (e.second > max || (e.second == max && maxv > e.first)) {
+                max = e.second;
+                maxv = e.first;
+            }
+        }
+        map<string,Node> em;
+        return Node{depth, depth, em, maxv};
+    }
     if (depth == traits.size() || start_entropy == 0.) {
         string l;
         for (auto const& d : dataset) {
@@ -179,13 +193,13 @@ Node recurse(double start_entropy, map<int, string> branch, int depth) {
     map<string, Node> children;
     for (auto const& s : poss_val[max_idx]) {
         branch[max_idx] = s;
-        children[s] = recurse(entropyfilter(branch), branch, depth+1);
+        children[s] = recurse(entropyfilter(branch), branch, depth+1, maxdepth);
     }
 
     return Node{depth, max_idx, children};
 }
 
-ID3 fit() {
+ID3 fit(int depth) {
     map<string, double> entropy;
     map<string, int> g;
     for (int i = 0; i < dataset.size(); i++) {
@@ -193,15 +207,59 @@ ID3 fit() {
     }
     double start_entropy = entropyf(g);
     map<int,string> f;
-    return ID3{recurse(start_entropy, f, 0)};
+    return ID3{recurse(start_entropy, f, 0, depth)};
 }
 
-Result calculate() {
-    return Result{};
+string most_common() {
+    map<string, int> counts;
+    for (auto const& d : dataset) {
+        counts[d[d.size()-1]]++;
+    }
+    int max = 0;
+    string maxv;
+    for (auto const &e : counts) {
+        if (e.second > max || (e.second == max && maxv > e.first)) {
+            max = e.second;
+            maxv = e.first;
+        }
+    }
+
+    return maxv;
+}
+
+string traverse(Node n, vector<string> traits) {
+    if (n.children.empty()) {
+        return n.val;
+    }
+    if (n.children.find(traits[n.nameId]) == n.children.end()) {
+        return most_common();
+    }
+    return traverse(n.children[traits[n.nameId]], traits);
+}
+
+Result calculate(const ID3& id3) {
+    vector<vector<int>> res;
+    string ress;
+    for (auto const &_ : labels) {
+        vector<int> rr;
+        for (auto const &_ : labels) {
+            rr.push_back(0);
+        }
+        res.push_back(rr);
+    }
+    for (auto const &d : test_dataset) {
+        string l = traverse(id3.root, d);
+        ress += l + " ";
+        int exp = labels[d[d.size()-1]];
+        int act = labels[l];
+        res[exp][act]++;
+    }
+    cout << ress + "\n";
+    return Result{res};
 }
 
 int main(int argc, char *argv[]) {
-    int depth = 0;
+    int depth = -1;
     string learn_path;
     string test_path;
 
@@ -232,7 +290,11 @@ int main(int argc, char *argv[]) {
     }
 
     string input;
+    set<string> lbls;
     while (getline(infile, input)) {
+        if (input == "") {
+            break;
+        }
         vector<string> data;
         int i = 0;
         for (unsigned long idx = input.find(','); idx > 0 && idx < input.length(); idx = input.find(',')) {
@@ -242,13 +304,22 @@ int main(int argc, char *argv[]) {
             input = input.substr(idx + 1);
         }
         data.push_back(input);
+        lbls.insert(input);
         dataset.push_back(data);
     }
 
+    int i = 0;
+    for (const auto & lbl : lbls) {
+        labels[lbl] = i++;
+    }
+
     ifstream testfile(test_path);
-    getline(infile, input);
+    getline(testfile, input);
 
     while (getline(testfile, input)) {
+        if (input == "") {
+            break;
+        }
         vector<string> data;
         for (unsigned long idx = input.find(','); idx > 0 && idx < input.length(); idx = input.find(',')) {
             string s = input.substr(0, idx);
@@ -260,9 +331,30 @@ int main(int argc, char *argv[]) {
         test_dataset.push_back(data);
     }
 
-    ID3 model = fit();
+    ID3 model = fit(depth);
     cout << "[BRANCHES]: \n";
     vector<NodeDesc> v;
     printTree(model.root, v);
-    Result res = calculate();
+    cout << "[PREDICTIONS]: ";
+    Result res = calculate(model);
+    //acc
+    int corr = 0;
+    int tot = 0;
+    for (int i = 0; i < labels.size(); i++) {
+        for (int j = 0; j < labels.size(); j++) {
+            if (i == j) {
+                corr += res.matrix[i][j];
+            }
+
+            tot += res.matrix[i][j];
+        }
+    }
+    ::printf("[ACCURACY]: %.5f\n", (double)corr/tot);
+    cout << "[CONFUSION_MATRIX]:\n";
+    for (int i = 0; i < labels.size(); i++) {
+        for (int j = 0; j < labels.size(); j++) {
+            ::printf("%d ", res.matrix[i][j]);
+        }
+        ::printf("\n");
+    }
 }
