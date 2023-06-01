@@ -332,11 +332,14 @@ int main(int argc, char *argv[]) {
     }
 
     ID3 model = fit(depth);
+
     cout << "[BRANCHES]: \n";
     vector<NodeDesc> v;
     printTree(model.root, v);
+
     cout << "[PREDICTIONS]: ";
     Result res = calculate(model);
+
     //acc
     int corr = 0;
     int tot = 0;
